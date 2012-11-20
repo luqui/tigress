@@ -51,6 +51,12 @@ data SolverState = SolverState {
 
 type Solver = StateT SolverState Logic
 
+runSolver :: Solver a -> [(Map.Map VarName Object, a)]
+runSolver solver = map (first ssSubst . swap) . observeAll $ runStateT solver state0
+    where
+    state0 = SolverState { ssFresh = 0, ssSubst = Map.empty }
+    swap (x,y) = (y,x)
+
 alloc :: Solver VarName
 alloc = do
     s <- get
@@ -58,8 +64,8 @@ alloc = do
     put $ s { ssFresh = 1 + x }
     return ("~" ++ show x)
 
-addSub :: VarName -> Object -> Solver ()
-addSub v o
+assign :: VarName -> Object -> Solver ()
+assign v o
     | v `Set.member` freeVars o = mzero
     | otherwise = do
         s <- get
@@ -70,11 +76,6 @@ normalize :: (Subst a) => a -> Solver a
 normalize x = do
     s <- gets ssSubst
     return $ subst s x
-
-zip' :: (Functor m, MonadPlus m) => [a] -> [b] -> m [(a,b)]
-zip' [] [] = return []
-zip' (x:xs) (y:ys) = ((x,y):) <$> zip' xs ys
-zip' _ _ = mzero
  
 unify :: Object -> Object -> Solver ()
 unify x y = do
@@ -82,12 +83,16 @@ unify x y = do
     y' <- normalize y
     case (x', y') of
         (Var a, Var b)           | a == b  -> return ()
-        (Var a, obj)                       -> addSub a obj
+        (Var a, obj)                       -> assign a obj
         (Cons h as, Cons h' as') | h == h' -> mapM_ (uncurry unify) =<< zip' as as'
         _                                  -> fail "No unification"
 
-runSolver :: Solver a -> [(Map.Map VarName Object, a)]
-runSolver solver = map (first ssSubst . swap) . observeAll $ runStateT solver state0
-    where
-    state0 = SolverState { ssFresh = 0, ssSubst = Map.empty }
-    swap (x,y) = (y,x)
+
+
+
+
+
+zip' :: (Functor m, MonadPlus m) => [a] -> [b] -> m [(a,b)]
+zip' [] [] = return []
+zip' (x:xs) (y:ys) = ((x,y):) <$> zip' xs ys
+zip' _ _ = mzero
