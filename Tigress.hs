@@ -10,14 +10,17 @@ import Control.Monad.Logic
 import Control.Monad.State
 import Control.Arrow
 
-class (Eq (DefID c)) => Config c where
+class (Eq (DefID c), Applicative (Effect c), Monad (Effect c)) => Config c where
     data DefID c :: *
+    data Effect c :: * -> *
+    data PredName c :: *
+
+    findRules :: PredName c -> Effect c [Rule c]
 
 type VarName = String
-type PredName = String
 
 infix 7 :@
-data Prop c = PredName :@ [Object c]
+data Prop c = PredName c :@ [Object c]
 
 infix 6 :=>
 data Rule c = [Prop c] :=> Prop c
@@ -26,20 +29,6 @@ infix 8 :%
 data Object c
     = Var VarName
     | DefID c :% [Object c]
-
-data Database c = Database {
-    dbRules :: Map.Map PredName [Rule c]
-}
-
-emptyDB :: Database c
-emptyDB = Database { dbRules = Map.empty }
-
-addRule :: Rule c -> Database c -> Database c
-addRule rule@(_ :=> (pred :@ _)) db = 
-    db { dbRules = Map.insertWith (++) pred [rule] (dbRules db) }
-
-fromRules :: [Rule c] -> Database c
-fromRules = foldr addRule emptyDB
 
 class FreeVars a where freeVars :: a -> Set.Set VarName
 instance (FreeVars a) => FreeVars [a] where freeVars = Set.unions . map freeVars
@@ -68,10 +57,10 @@ data SolverState c = SolverState {
     ssSubst :: Substitution c
 }
 
-type Solver c = StateT (SolverState c) Logic
+type Solver c = StateT (SolverState c) (LogicT (Effect c))
 
-runSolver :: Solver c a -> [(Substitution c, a)]
-runSolver solver = map (first ssSubst . swap) . observeAll $ runStateT solver state0
+runSolver :: (Config c) => Solver c a -> Int -> Effect c [(Substitution c, a)]
+runSolver solver limit = (fmap.map) (first ssSubst . swap) . observeManyT limit $ runStateT solver state0
     where
     state0 = SolverState { ssFresh = 0, ssSubst = Map.empty }
     swap (x,y) = (y,x)
@@ -107,14 +96,14 @@ unify x y = do
         (h :% as, h' :% as') | h == h' -> mapM_ (uncurry unify) =<< zip' as as'
         _                              -> fail "No unification"
 
-satisfy :: (Config c) => Database c -> Prop c -> Solver c ()
-satisfy db (pred :@ args) = do
-    let (Just rules) = Map.lookup pred (dbRules db)
+satisfy :: (Config c) => Prop c -> Solver c ()
+satisfy (pred :@ args) = do
+    rules <- lift.lift $ findRules pred
     msum $ map (applyRule <=< instantiate) rules
     where
     applyRule (hyps :=> (_ :@ args')) = do
         mapM_ (uncurry unify) =<< zip' args args'
-        mapM_ (satisfy db) hyps
+        mapM_ satisfy hyps
 
 instantiate :: forall a c. (FreeVars a, Subst c a) => a -> Solver c a
 instantiate x = do
@@ -125,17 +114,3 @@ zip' :: (Functor m, MonadPlus m) => [a] -> [b] -> m [(a,b)]
 zip' [] [] = return []
 zip' (x:xs) (y:ys) = ((x,y):) <$> zip' xs ys
 zip' _ _ = mzero
-
-
-{-
-appendDB = fromRules [
-    [] :=> "append" :@ [ "nil" :% [], Var "Ys", Var "Ys" ],
-    [ "append" :@ [ Var "Xs", Var "Ys", Var "Zs" ] ]
-       :=> "append" :@ [ "cons" :% [ Var "X", Var "Xs" ], Var "Ys", "cons" :% [ Var "X", Var "Zs" ] ]
-    ]
-
-testList :: [Object c] -> Object c
-testList = foldr (\x xs -> "cons" :% [ x, xs ]) ("nil" :% [])
-
-appendTest1 = "append" :@ [ testList [ "a" :% [], "b" :% [] ], testList [ "c" :% [], "d" :% [] ], Var "Z" ]
--}
