@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections, TypeFamilies, FlexibleContexts, MultiParamTypeClasses, FlexibleInstances, ScopedTypeVariables #-}
 
-module Tigress where
+module Solver where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
