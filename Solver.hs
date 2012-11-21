@@ -1,6 +1,13 @@
 {-# LANGUAGE TupleSections, TypeFamilies, FlexibleContexts, MultiParamTypeClasses, FlexibleInstances, ScopedTypeVariables #-}
 
-module Solver where
+module Solver 
+    ( Config(..)
+    , Prop(..)
+    , Rule(..)
+    , Object(..)
+    , runSolver
+    )
+where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
