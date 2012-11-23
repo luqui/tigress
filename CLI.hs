@@ -16,6 +16,8 @@ import qualified Text.Parsec.String as P
 import qualified System.IO.Temp as Temp
 import System.Process (system)
 import System.IO (hPutStrLn, hFlush, hClose)
+import System.Posix.Files (getFileStatus, modificationTime)
+--import System.Posix.Time (modificationTime)
 
 data CLI
 
@@ -61,18 +63,33 @@ type Parser = P.Parsec String ()
 space :: Parser ()
 space = P.space *> P.spaces
 
+editor :: String -> String -> String -> IO (Maybe String)
+editor env delim str = Temp.withSystemTempDirectory "tigress" $ \dir -> do
+    Temp.withTempFile dir "edit.js" $ \path handle -> do
+        hPutStrLn handle env
+        hPutStrLn handle delim
+        hPutStrLn handle str
+        hClose handle
+
+        stat <- getFileStatus path
+        system $ "vim + " ++ path
+        stat' <- getFileStatus path
+        if modificationTime stat' > modificationTime stat then do
+            cts <- readFile path
+            return . Just . unlines . safeTail . dropWhile (/= delim) . lines $ cts
+        else 
+            return Nothing
+
+safeTail [] = []
+safeTail (x:xs) = xs
+        
+
 cmd :: Parser (Shell ())
 cmd = define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum)
     where
     define name = do
-        contents <- liftIO . Temp.withSystemTempDirectory "tigress" $ \dir -> do
-            Temp.withTempFile dir "edit.js" $ \path handle -> do
-                hPutStrLn handle $ "// " ++ name
-                hClose handle
-                system $ "vim " ++ path
-                cts <- readFile path
-                length cts `seq` return cts
-        liftIO . putStrLn $ contents
+        contents <- liftIO $ editor ("// " ++ name) "//////////" ""
+        liftIO . print $ contents
             
 
 mainShell :: Shell ()
