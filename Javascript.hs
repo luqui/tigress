@@ -1,6 +1,6 @@
 {-# LANGUAGE StandaloneDeriving, DeriveDataTypeable #-}
 
--- module Javascript where
+module Javascript (Vars(..), vars) where
 
 import Language.JavaScript.Parser
 import Language.JavaScript.Parser.AST
