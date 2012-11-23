@@ -10,7 +10,6 @@ import Data.Typeable
 import Data.Monoid
 import Control.Arrow
 import Text.Show.Pretty (ppShow)
-import Debug.Trace
 
 
 data Vars = Vars {
@@ -26,38 +25,34 @@ instance Monoid Vars where
 vars :: String -> Either String Vars
 vars i = right gvars $ parse i "<input>"
 
-countChildren :: (Data a) => a -> Int
-countChildren x | trace ("Traversing a " ++ show (typeOf x)) False = undefined
-countChildren x = succ . sum . gmapQ countChildren $ x
-
-traced f x = trace (show (f x)) x
-
 gvars :: (Data a) => a -> Vars
-gvars x | trace ("Traversing a " ++ show (typeOf x)) False = undefined
 gvars x = case cast x of
     Just n | Just vs <- query n -> vs
-    y                           -> mconcat (gmapQ gvars y)
+    y                           -> mconcat (gmapQ gvars x)
 
-getIdentifier :: JSNode -> String
-getIdentifier (NN (JSIdentifier s)) = s
-getIdentifier (NT (JSIdentifier s) _ _) = s
-getIdentifier x = error $ "Not an identifier: " ++ show x
+getIdentifier :: JSNode -> [String]
+getIdentifier (NN (JSIdentifier s)) = [s]
+getIdentifier (NT (JSIdentifier s) _ _) = [s]
+getIdentifier _ = []
 
 query :: Node -> Maybe Vars
-query x | trace (show x) False = undefined
 query (JSFunction _ nameS _ paramsS _ body) = Just $ Vars {
-        freeVars = freeVars vbody `Set.difference` Set.fromList (map getIdentifier paramsS),
-        definedVars = Set.singleton (getIdentifier nameS)
+        freeVars = freeVars vbody 
+                `Set.difference` Set.fromList (concatMap getIdentifier paramsS)
+                `Set.difference` definedVars vbody,
+        definedVars = Set.fromList (getIdentifier nameS)
     }
     where vbody = gvars body
 query (JSFunctionExpression _ namesS _ paramsS _ body) = Just $ Vars {
-        freeVars = freeVars vbody `Set.difference` Set.fromList (map getIdentifier paramsS),
-        definedVars = Set.fromList (map getIdentifier namesS)
+        freeVars = freeVars vbody 
+                `Set.difference` Set.fromList (concatMap getIdentifier paramsS)
+                `Set.difference` definedVars vbody,
+        definedVars = Set.fromList (concatMap getIdentifier namesS)
     }
     where vbody = gvars body
 query (JSVarDecl name init) = Just $ Vars {
         freeVars = freeVars (gvars init),
-        definedVars = Set.singleton (getIdentifier name)
+        definedVars = Set.fromList (getIdentifier name)
     }
 query (JSWith _ _ e _ block) = Just $ Vars {  -- ignore free variables in body of with
         freeVars = freeVars ve,
@@ -68,4 +63,7 @@ query (JSIdentifier ident) = Just $ Vars {
         freeVars = Set.singleton ident,
         definedVars = Set.empty
     }
+query (JSMemberDot pre _ _) = Just $ gvars pre    -- ignore identifiers after a dot  
+query (JSCallExpression "." _ _ _) = Just mempty  -- same
+query (JSPropertyNameandValue _ _ value) = Just $ gvars value
 query x = Nothing
