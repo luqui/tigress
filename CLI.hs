@@ -3,6 +3,7 @@
 module CLI where
 
 import Solver
+import Control.Monad.Trans
 import Control.Monad.Trans.State.Strict
 import Control.Monad.IO.Class
 import Control.Monad
@@ -17,7 +18,6 @@ import qualified System.IO.Temp as Temp
 import System.Process (system)
 import System.IO (hPutStrLn, hFlush, hClose)
 import System.Posix.Files (getFileStatus, modificationTime)
---import System.Posix.Time (modificationTime)
 
 data CLI
 
@@ -28,7 +28,7 @@ data Definition = Definition {
 data Database = Database {
     dbRules :: Map.Map (PredName CLI) [Rule CLI],
     dbDefns :: Map.Map (DefID CLI) Definition,
-    dbEnv   :: Map.Map String (DefID CLI)
+    dbEnv   :: [Prop CLI]
 }
 
 emptyDatabase = Database {
@@ -58,11 +58,6 @@ instance Config CLI where
 
 type Shell = InputT (StateT Database IO)
 
-type Parser = P.Parsec String () 
-
-space :: Parser ()
-space = P.space *> P.spaces
-
 editor :: String -> String -> String -> IO (Maybe String)
 editor env delim str = Temp.withSystemTempDirectory "tigress" $ \dir -> do
     Temp.withTempFile dir "edit.js" $ \path handle -> do
@@ -82,15 +77,51 @@ editor env delim str = Temp.withSystemTempDirectory "tigress" $ \dir -> do
 
 safeTail [] = []
 safeTail (x:xs) = xs
-        
+
+addDefn :: String -> Definition -> Shell ()
+addDefn localName defn = do
+    uuid <- DefID <$> liftIO UUID.uuid
+    let prop = PredName "eq" [Var localname, uuid :% []]
+    lift . modify $ \db -> db { dbDefns = Map.insert uuid defn (dbDefns db)
+                              , dbEnv = Map.insert localName uuid (dbEnv db) }
+
+indent :: String -> String -> String
+indent pre = unlines . map (pre ++) . lines
+
+type Parser = P.Parsec String () 
+
+prop :: DB -> Parser (Prop CLI)
+prop db = liftA2 (:@) (P.many1 P.alphaNum) (P.many (object db))
+
+object :: DB -> Parser (Oject CLI)
+object db = wiffle <$> P.many1 P.alphaNum
+    where
+    wiffle ident 
+        | Just x <- Map.lookup ident (dbEnv db) 
+
+space :: Parser ()
+space = P.space *> P.spaces
 
 cmd :: Parser (Shell ())
-cmd = define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum)
+cmd = P.choice [
+    define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum),
+    env <$> (P.string "env" *> pure ())
+    ]
+
     where
     define name = do
-        contents <- liftIO $ editor ("// " ++ name) "//////////" ""
-        liftIO . print $ contents
-            
+        mcontents <- liftIO $ editor ("// " ++ name) "//////////" ""
+        case mcontents of
+            Just contents -> do
+                addDefn name (Definition { defCode = contents })
+                liftIO . putStrLn $ "defined " ++ name
+            Nothing ->
+                liftIO . putStrLn $ "cancelled"
+    env () = do
+        db <- lift get
+        liftIO . forM_ (Map.toList (dbEnv db)) $ \(k,v) -> do
+            putStrLn k
+            putStrLn . indent "    " . defCode $ dbDefns db Map.! v
 
 mainShell :: Shell ()
 mainShell = do
