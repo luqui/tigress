@@ -35,14 +35,19 @@ data Definition = Definition {
 data Database = Database {
     dbRules       :: Map.Map (PredName CLI) [Rule CLI],
     dbDefns       :: Map.Map (DefID CLI) Definition,
-    dbAssumptions :: [Prop CLI]
+    dbAssumptions :: [Prop CLI],
+    dbAssertions  :: [Prop CLI]
 }
 
 emptyDatabase = Database {
-    dbRules = Map.singleton (PredName "eq") [ [] :=> PredName "eq" :@ [ Var "X", Var "X" ] ],
+    dbRules = singletonRule $ [] :=> PredName "eq" :@ [ Var "X", Var "X" ],
     dbDefns = Map.empty,
-    dbAssumptions = []
+    dbAssumptions = [],
+    dbAssertions = []
 }
+
+singletonRule :: Rule CLI -> Map.Map (PredName CLI) [Rule CLI]
+singletonRule r@(_ :=> p :@ _) = Map.singleton p [r]
 
 instance Functor (Effect CLI) where
     fmap f (Effect x) = Effect (fmap f x)
@@ -128,7 +133,9 @@ cmd :: Parser (Shell ())
 cmd = P.choice [
     define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum),
     env <$> (P.string "env" *> pure ()),
-    assume <$> (P.string "assume" *> space *> prop)
+    assume <$> (P.string "assume" *> space *> prop),
+    assert <$> (P.string "assert" *> space *> prop),
+    clear <$> (P.string "clear" *> pure ())
     ]
 
     where
@@ -150,6 +157,19 @@ cmd = P.choice [
 
     assume p = do
         lift . modify $ \db -> db { dbAssumptions = p : dbAssumptions db }
+
+    assert p = do
+        lift . modify $ \db -> db { dbAssertions = p : dbAssertions db }
+
+    clear () = do
+        assumptions <- lift $ gets dbAssumptions
+        assertions <- lift $ gets dbAssertions
+        let newRules = Map.unionsWith (++) $ map (singletonRule . (assumptions :=>)) assertions
+        lift . modify $ \db -> db {
+            dbRules = Map.unionWith (++) newRules (dbRules db),
+            dbAssumptions = [],
+            dbAssertions = []
+        }
 
 mainShell :: Shell ()
 mainShell = do
