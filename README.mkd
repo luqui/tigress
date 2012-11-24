@@ -1,10 +1,9 @@
 This is the latest whack at the Sequent code organization system.  To start it
 up, just
 
-    runhaskell CLI.hs
-
-I know it depends on some libraries and I haven't taken the time to write down
-which ones.  Good luck!
+    % cabal configure
+    % cabal build
+    % ./dist/build/tigress/tigress
 
 Once you're there, you get a prompt
 
