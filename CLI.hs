@@ -2,27 +2,34 @@
 
 module CLI where
 
-import Solver
 import Control.Monad.Trans
 import Control.Monad.Trans.State.Strict
 import Control.Monad.IO.Class
 import Control.Monad
 import Control.Applicative
+import Control.Arrow
 import System.Console.Haskeline
+import Data.List (intercalate)
 import qualified Data.UUID as UUID
 import qualified System.UUID.V4 as UUID
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Text.Parsec as P
 import qualified Text.Parsec.String as P
+import qualified Text.PrettyPrint as PP
 import qualified System.IO.Temp as Temp
 import System.Process (system)
 import System.IO (hPutStrLn, hFlush, hClose)
 import System.Posix.Files (getFileStatus, modificationTime)
 
+import Solver
+import qualified Javascript as JS
+
 data CLI
 
 data Definition = Definition {
-    defCode :: String
+    defCode :: String,
+    defDeps :: [String]
 }
 
 data Database = Database {
@@ -32,9 +39,9 @@ data Database = Database {
 }
 
 emptyDatabase = Database {
-    dbRules = Map.empty,
+    dbRules = Map.singleton (PredName "eq") [ [] :=> PredName "eq" :@ [ Var "X", Var "X" ] ],
     dbDefns = Map.empty,
-    dbEnv = Map.empty
+    dbEnv = []
 }
 
 instance Functor (Effect CLI) where
@@ -81,23 +88,38 @@ safeTail (x:xs) = xs
 addDefn :: String -> Definition -> Shell ()
 addDefn localName defn = do
     uuid <- DefID <$> liftIO UUID.uuid
-    let prop = PredName "eq" [Var localname, uuid :% []]
+    let prop = PredName "eq" :@ [Var localName, uuid :% []]
     lift . modify $ \db -> db { dbDefns = Map.insert uuid defn (dbDefns db)
-                              , dbEnv = Map.insert localName uuid (dbEnv db) }
+                              , dbEnv = prop : dbEnv db }
+
+makeDefn :: String -> Either String Definition
+makeDefn code = right (\v -> Definition { defCode = code, defDeps = Set.toList (JS.freeVars v)})
+                (JS.vars code)
 
 indent :: String -> String -> String
 indent pre = unlines . map (pre ++) . lines
 
+showObject :: Object CLI -> PP.Doc
+showObject (Var v) = PP.text v
+showObject (DefID def :% deps) = PP.text (show def) PP.<> PP.brackets (PP.hsep (PP.punctuate PP.comma (map showObject deps)))
+
+showProp :: Prop CLI -> PP.Doc
+showProp (PredName n :@ args) = PP.text n PP.<+> PP.hsep (map showObject args)
+
+showRule :: Rule CLI -> PP.Doc
+showRule (assns :=> con) = showProp con PP.<+> PP.text ":-" PP.<+> PP.vcat (map showProp assns)
+
+showEnv :: Database -> PP.Doc
+showEnv db = PP.vcat (map showProp (dbEnv db))
+
 type Parser = P.Parsec String () 
 
-prop :: DB -> Parser (Prop CLI)
-prop db = liftA2 (:@) (P.many1 P.alphaNum) (P.many (object db))
+prop :: Database -> Parser (Prop CLI)
+prop db = liftA2 (:@) (PredName <$> P.many1 P.alphaNum) (P.many (object db))
 
-object :: DB -> Parser (Oject CLI)
-object db = wiffle <$> P.many1 P.alphaNum
-    where
-    wiffle ident 
-        | Just x <- Map.lookup ident (dbEnv db) 
+object :: Database -> Parser (Object CLI)
+object db = Var <$> P.many1 P.alphaNum
+
 
 space :: Parser ()
 space = P.space *> P.spaces
@@ -113,15 +135,17 @@ cmd = P.choice [
         mcontents <- liftIO $ editor ("// " ++ name) "//////////" ""
         case mcontents of
             Just contents -> do
-                addDefn name (Definition { defCode = contents })
-                liftIO . putStrLn $ "defined " ++ name
+                case makeDefn contents of
+                    Left err -> liftIO . putStrLn $ err
+                    Right defn -> do
+                        addDefn name defn
+                        liftIO . putStrLn $ "defined " ++ name
             Nothing ->
                 liftIO . putStrLn $ "cancelled"
+
     env () = do
         db <- lift get
-        liftIO . forM_ (Map.toList (dbEnv db)) $ \(k,v) -> do
-            putStrLn k
-            putStrLn . indent "    " . defCode $ dbDefns db Map.! v
+        liftIO . putStrLn . PP.render . showEnv $ db
 
 mainShell :: Shell ()
 mainShell = do
