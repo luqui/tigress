@@ -19,7 +19,7 @@ import qualified Text.Parsec as P
 import qualified Text.Parsec.String as P
 import qualified Text.PrettyPrint as PP
 import qualified System.IO.Temp as Temp
-import System.Process (system)
+import System.Process (system, rawSystem)
 import System.IO (hPutStrLn, hFlush, hClose)
 import System.Posix.Files (getFileStatus, modificationTime)
 import System.Directory (doesFileExist)
@@ -119,7 +119,11 @@ showRule :: Rule CLI -> PP.Doc
 showRule (assns :=> con) = showProp con PP.<+> PP.text ":-" PP.<+> PP.vcat (map showProp assns)
 
 showEnv :: Database -> PP.Doc
-showEnv db = PP.vcat (map showProp (dbAssumptions db))
+showEnv db = PP.vcat 
+    [ PP.vcat (map showProp (dbAssumptions db))
+    , PP.text "----------"
+    , PP.vcat (map showProp (dbAssertions db))
+    ]
 
 type Parser = P.Parsec String () 
 
@@ -133,29 +137,37 @@ object = Var <$> P.many1 P.alphaNum
 space :: Parser ()
 space = P.space *> P.spaces
 
+defineLocal :: String -> String -> Shell ()
+defineLocal name code = do
+    case makeDefn code of
+        Left err -> liftIO . putStrLn $ "Parse error: " ++ err
+        Right defn -> do
+            addDefn name defn
+            liftIO . putStrLn $ "defined " ++ name
+
 cmd :: Parser (Shell ())
 cmd = P.choice $ map P.try [
-    define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum),
+    define <$> (P.string "define" *> space *> P.many1 P.alphaNum),
+    defineInline <$> (P.many1 P.alphaNum <* P.spaces <* P.char '=' <* P.spaces) <*> P.many (P.satisfy (const True)),
+    eval <$> ((P.string "eval" <|> P.string "!") *> P.many (P.satisfy (const True))),
     env <$> (P.string "env" *> pure ()),
     rules <$> (P.string "rules" *> pure ()),
     assume <$> (P.string "assume" *> space *> prop),
     assert <$> (P.string "assert" *> space *> prop),
-    clear <$> (P.string "clear" *> pure ()),
-    repl <$> (P.string "repl" *> pure ())
+    clear <$> (P.string "clear" *> pure ())
     ]
 
     where
     define name = do
-        mcontents <- liftIO $ editor ("// " ++ name) "//////////" ""
+        db <- lift get
+        let shEnv = unlines . map ("// " ++) . lines . PP.render $ showEnv db
+        let prefix = shEnv ++ "\n// defining: " ++ name
+        mcontents <- liftIO $ editor prefix "//////////" ""
         case mcontents of
-            Just contents -> 
-                case makeDefn contents of
-                    Left err -> liftIO . putStrLn $ err
-                    Right defn -> do
-                        addDefn name defn
-                        liftIO . putStrLn $ "defined " ++ name
-            Nothing ->
-                liftIO . putStrLn $ "cancelled"
+            Just contents -> defineLocal name contents
+            Nothing -> liftIO . putStrLn $ "cancelled"
+
+    defineInline name code = defineLocal name code
 
     env () = do
         db <- lift get
@@ -181,13 +193,13 @@ cmd = P.choice $ map P.try [
             dbAssertions = []
         }
 
-    repl () = do
+    eval str = do
         code <- assemble
         case code of
             Nothing -> return ()
             Just code' -> do
                 liftIO $ writeFile "assemble.js" code'
-                liftIO $ system "node"
+                liftIO $ rawSystem "node" ["-e", "require('./assemble.js'); console.log(" ++ str ++ ");" ]
                 return ()
 
 assemble :: Shell (Maybe String)
