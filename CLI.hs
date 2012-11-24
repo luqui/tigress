@@ -145,6 +145,23 @@ defineLocal name code = do
             addDefn name defn
             liftIO . putStrLn $ "defined " ++ name
 
+defineEditor :: String -> Shell ()
+defineEditor name = do
+    db <- lift get
+    let shEnv = unlines . map ("// " ++) . lines . PP.render $ showEnv db
+    let prefix = shEnv ++ "// defining: " ++ name
+    let go pfx code = do
+            mcontents <- liftIO $ editor (prefix ++ "\n// " ++ pfx) "//////////" code
+            case mcontents of
+                Just contents -> case makeDefn contents of
+                    Left err -> go ("Parse error: " ++ err) contents
+                    Right defn -> do
+                        addDefn name defn
+                        liftIO . putStrLn $ "defined " ++ name
+                Nothing -> liftIO . putStrLn $ "cancelled"
+    go "" ""
+    
+
 cmd :: Parser (Shell ())
 cmd = P.choice $ map P.try [
     define <$> (P.string "define" *> space *> P.many1 P.alphaNum),
@@ -158,16 +175,9 @@ cmd = P.choice $ map P.try [
     ]
 
     where
-    define name = do
-        db <- lift get
-        let shEnv = unlines . map ("// " ++) . lines . PP.render $ showEnv db
-        let prefix = shEnv ++ "\n// defining: " ++ name
-        mcontents <- liftIO $ editor prefix "//////////" ""
-        case mcontents of
-            Just contents -> defineLocal name contents
-            Nothing -> liftIO . putStrLn $ "cancelled"
+    define = defineEditor
 
-    defineInline name code = defineLocal name code
+    defineInline = defineLocal
 
     env () = do
         db <- lift get
