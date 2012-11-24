@@ -88,7 +88,7 @@ safeTail (x:xs) = xs
 addDefn :: String -> Definition -> Shell ()
 addDefn localName defn = do
     uuid <- DefID <$> liftIO UUID.uuid
-    let prop = PredName "eq" :@ [Var localName, uuid :% []]
+    let prop = PredName "eq" :@ [Var localName, uuid :% map Var (defDeps defn)]
     lift . modify $ \db -> db { dbDefns = Map.insert uuid defn (dbDefns db)
                               , dbEnv = prop : dbEnv db }
 
@@ -114,11 +114,11 @@ showEnv db = PP.vcat (map showProp (dbEnv db))
 
 type Parser = P.Parsec String () 
 
-prop :: Database -> Parser (Prop CLI)
-prop db = liftA2 (:@) (PredName <$> P.many1 P.alphaNum) (P.many (object db))
+prop :: Parser (Prop CLI)
+prop = liftA2 (:@) (PredName <$> P.many1 P.alphaNum) (P.many (space *> object))
 
-object :: Database -> Parser (Object CLI)
-object db = Var <$> P.many1 P.alphaNum
+object :: Parser (Object CLI)
+object = Var <$> P.many1 P.alphaNum
 
 
 space :: Parser ()
@@ -127,14 +127,15 @@ space = P.space *> P.spaces
 cmd :: Parser (Shell ())
 cmd = P.choice [
     define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum),
-    env <$> (P.string "env" *> pure ())
+    env <$> (P.string "env" *> pure ()),
+    assume <$> (P.string "assume" *> space *> prop)
     ]
 
     where
     define name = do
         mcontents <- liftIO $ editor ("// " ++ name) "//////////" ""
         case mcontents of
-            Just contents -> do
+            Just contents -> 
                 case makeDefn contents of
                     Left err -> liftIO . putStrLn $ err
                     Right defn -> do
@@ -147,13 +148,16 @@ cmd = P.choice [
         db <- lift get
         liftIO . putStrLn . PP.render . showEnv $ db
 
+    assume p = do
+        lift . modify $ \db -> db { dbEnv = p : dbEnv db }
+
 mainShell :: Shell ()
 mainShell = do
     inp <- getInputLine "> "
     case inp of
         Nothing -> return ()
         Just line -> do
-            case P.runParser cmd () "<input>" line of
+            case P.runParser (cmd <* P.eof) () "<input>" line of
                 Left err -> liftIO $ print err
                 Right m -> m
             mainShell
