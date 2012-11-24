@@ -1,0 +1,46 @@
+This is the latest whack at the Sequent code organization system.  To start it
+up, just
+
+    runhaskell CLI.hs
+
+I know it depends on some libraries and I haven't taken the time to write down
+which ones.  Good luck!
+
+Once you're there, you get a prompt
+
+    > 
+
+Right now the object language is Javascript.  So you can define Javascript
+objects
+
+    > id = function(x) { return x }
+
+Or if you prefer to use an editor
+
+    > define id
+
+And then use them
+
+    > eval id(42)
+    42
+
+And you can make abstractions
+
+    > assert identity id
+
+Check out
+
+    > env
+
+Which shows you your current concrete environment.
+
+Once you are done with a concrete environment, you can discharge it
+
+    > clear
+
+And then use the abstractions
+
+    > assume identity ident
+    > eval ident(4)
+
+More later.
