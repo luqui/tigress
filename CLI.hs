@@ -137,6 +137,7 @@ cmd :: Parser (Shell ())
 cmd = P.choice $ map P.try [
     define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum),
     env <$> (P.string "env" *> pure ()),
+    rules <$> (P.string "rules" *> pure ()),
     assume <$> (P.string "assume" *> space *> prop),
     assert <$> (P.string "assert" *> space *> prop),
     clear <$> (P.string "clear" *> pure ()),
@@ -159,6 +160,10 @@ cmd = P.choice $ map P.try [
     env () = do
         db <- lift get
         liftIO . putStrLn . PP.render . showEnv $ db
+
+    rules () = do
+        db <- lift get
+        liftIO . putStrLn . PP.render . PP.vcat . map showRule . concat . Map.elems . dbRules $ db
 
     assume p = do
         lift . modify $ \db -> db { dbAssumptions = p : dbAssumptions db }
