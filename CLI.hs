@@ -1,15 +1,16 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses, RecordWildCards #-}
 
 module CLI where
 
 import Control.Monad.Trans
 import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.Reader
 import Control.Monad.IO.Class
 import Control.Monad
 import Control.Applicative
 import Control.Arrow
 import System.Console.Haskeline
-import Data.List (intercalate)
+import Data.List (intercalate, isPrefixOf)
 import qualified Data.UUID as UUID
 import qualified System.UUID.V4 as UUID
 import qualified Data.Map as Map
@@ -21,6 +22,7 @@ import qualified System.IO.Temp as Temp
 import System.Process (system)
 import System.IO (hPutStrLn, hFlush, hClose)
 import System.Posix.Files (getFileStatus, modificationTime)
+import System.Directory (doesFileExist)
 
 import Solver
 import qualified Javascript as JS
@@ -31,6 +33,7 @@ data Definition = Definition {
     defCode :: String,
     defDeps :: [String]
 }
+    deriving (Read,Show)
 
 data Database = Database {
     dbRules       :: Map.Map (PredName CLI) [Rule CLI],
@@ -38,6 +41,7 @@ data Database = Database {
     dbAssumptions :: [Prop CLI],
     dbAssertions  :: [Prop CLI]
 }
+    deriving (Read,Show)
 
 emptyDatabase = Database {
     dbRules = singletonRule $ [] :=> PredName "eq" :@ [ Var "X", Var "X" ],
@@ -60,12 +64,12 @@ instance Monad (Effect CLI) where
 
 instance Config CLI where
     newtype DefID CLI = DefID UUID.UUID
-        deriving (Eq, Ord)
-    newtype Effect CLI a = Effect { runEffect :: State Database a }
+        deriving (Eq,Ord,Read,Show)
+    newtype Effect CLI a = Effect { runEffect :: Reader Database a }
     newtype PredName CLI = PredName String
-        deriving (Eq,Ord)
+        deriving (Eq,Ord,Read,Show)
 
-    findRules name = maybe [] id <$> Effect (gets (Map.lookup name . dbRules))
+    findRules name = maybe [] id <$> Effect (asks (Map.lookup name . dbRules))
 
 
 type Shell = InputT (StateT Database IO)
@@ -130,12 +134,13 @@ space :: Parser ()
 space = P.space *> P.spaces
 
 cmd :: Parser (Shell ())
-cmd = P.choice [
+cmd = P.choice $ map P.try [
     define <$> ((P.string "define" <|> P.string "def") *> space *> P.many1 P.alphaNum),
     env <$> (P.string "env" *> pure ()),
     assume <$> (P.string "assume" *> space *> prop),
     assert <$> (P.string "assert" *> space *> prop),
-    clear <$> (P.string "clear" *> pure ())
+    clear <$> (P.string "clear" *> pure ()),
+    repl <$> (P.string "repl" *> pure ())
     ]
 
     where
@@ -171,6 +176,41 @@ cmd = P.choice [
             dbAssertions = []
         }
 
+    repl () = do
+        code <- assemble
+        case code of
+            Nothing -> return ()
+            Just code' -> do
+                liftIO $ writeFile "assemble.js" code'
+                liftIO $ system "node"
+                return ()
+
+assemble :: Shell (Maybe String)
+assemble = do
+    props <- lift $ gets dbAssumptions
+    ruleProps <- lift $ gets dbAssertions
+    defns <- lift $ gets dbDefns
+    let newRules = Map.unionsWith (++) $ map (singletonRule . ([] :=>)) ruleProps
+    db <- lift get
+    let db' = db { dbRules = Map.unionWith (++) newRules (dbRules db) }
+    case map fst $ runReader (runEffect (runSolver (mapM_ satisfy props) 1)) db' of
+        [] -> do
+            liftIO . putStrLn $ "No solution"
+            return Nothing
+        [sub] -> do
+            let defs = [ (k, assemble' defns v) | (k, v) <- Map.toList sub, not ("~" `isPrefixOf` k) ]
+            let code = unlines $ map (\(k,code) -> k ++ " = " ++ code ++ ";") defs
+            return $ Just code
+
+assemble' :: Map.Map (DefID CLI) Definition -> Object CLI -> String
+assemble' defns (Var x) = "\"<<<Variable " ++ x ++ ">>>\""
+assemble' defns (defid :% args) = assembleDefn (defns Map.! defid)
+    where
+    assembleDefn (Definition {..}) = 
+        "(function(" ++ intercalate "," defDeps ++ ") { return (" ++ defCode ++ ") })("
+            ++ intercalate "," (map (assemble' defns) args) ++ ")"
+
+
 mainShell :: Shell ()
 mainShell = do
     inp <- getInputLine "> "
@@ -182,5 +222,18 @@ mainShell = do
                 Right m -> m
             mainShell
 
+load :: Shell ()
+load = do
+    ex <- liftIO $ doesFileExist "tigress.db"
+    when ex $ do
+        db <- fmap read . liftIO $ readFile "tigress.db"
+        lift $ put $! db
 
-main = execStateT (runInputT defaultSettings mainShell) emptyDatabase
+save :: Shell ()
+save = do
+    db <- lift get
+    liftIO $ writeFile "tigress.db" (show db)
+
+main = do
+    execStateT (runInputT defaultSettings (load >> mainShell >> save)) emptyDatabase
+    return ()

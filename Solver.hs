@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, TypeFamilies, FlexibleContexts, MultiParamTypeClasses, FlexibleInstances, ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections, TypeFamilies, FlexibleContexts, MultiParamTypeClasses, FlexibleInstances, ScopedTypeVariables, StandaloneDeriving, UndecidableInstances, ConstraintKinds #-}
 
 module Solver 
     ( Config(..)
@@ -6,6 +6,7 @@ module Solver
     , Rule(..)
     , Object(..)
     , runSolver
+    , satisfy
     )
 where
 
@@ -26,16 +27,28 @@ class (Eq (DefID c), Applicative (Effect c), Monad (Effect c)) => Config c where
 
 type VarName = String
 
+type ReadConstraints c = (Read (PredName c), Read (DefID c))
+type ShowConstraints c = (Show (PredName c), Show (DefID c))
+
 infix 7 :@
 data Prop c = PredName c :@ [Object c]
 
+deriving instance (ReadConstraints c) => Read (Prop c)
+deriving instance (ShowConstraints c) => Show (Prop c)
+
 infix 6 :=>
 data Rule c = [Prop c] :=> Prop c
+
+deriving instance (ReadConstraints c) => Read (Rule c)
+deriving instance (ShowConstraints c) => Show (Rule c)
 
 infix 8 :%
 data Object c
     = Var VarName
     | DefID c :% [Object c]
+
+deriving instance (ReadConstraints c) => Read (Object c)
+deriving instance (ShowConstraints c) => Show (Object c)
 
 class FreeVars a where freeVars :: a -> Set.Set VarName
 instance (FreeVars a) => FreeVars [a] where freeVars = Set.unions . map freeVars
