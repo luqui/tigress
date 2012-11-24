@@ -35,7 +35,14 @@ data Definition = Definition {
 }
     deriving (Read,Show)
 
+data RuleDoc = RuleDoc {
+    rdocName :: String,
+    rdocDescription :: String
+}
+    deriving (Read,Show)
+
 data Database = Database {
+    dbRuleDocs    :: Map.Map (PredName CLI) RuleDoc,
     dbRules       :: Map.Map (PredName CLI) [Rule CLI],
     dbDefns       :: Map.Map (DefID CLI) Definition,
     dbAssumptions :: [Prop CLI],
@@ -43,7 +50,14 @@ data Database = Database {
 }
     deriving (Read,Show)
 
+eqDoc :: RuleDoc
+eqDoc = RuleDoc {
+    rdocName = "eq",
+    rdocDescription = "`eq X Y` asserts that the objects X and Y are equal."
+}
+
 emptyDatabase = Database {
+    dbRuleDocs = Map.singleton (PredName "eq") eqDoc,
     dbRules = singletonRule $ [] :=> PredName "eq" :@ [ Var "X", Var "X" ],
     dbDefns = Map.empty,
     dbAssumptions = [],
