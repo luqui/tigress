@@ -33,15 +33,15 @@ data Definition = Definition {
 }
 
 data Database = Database {
-    dbRules :: Map.Map (PredName CLI) [Rule CLI],
-    dbDefns :: Map.Map (DefID CLI) Definition,
-    dbEnv   :: [Prop CLI]
+    dbRules       :: Map.Map (PredName CLI) [Rule CLI],
+    dbDefns       :: Map.Map (DefID CLI) Definition,
+    dbAssumptions :: [Prop CLI]
 }
 
 emptyDatabase = Database {
     dbRules = Map.singleton (PredName "eq") [ [] :=> PredName "eq" :@ [ Var "X", Var "X" ] ],
     dbDefns = Map.empty,
-    dbEnv = []
+    dbAssumptions = []
 }
 
 instance Functor (Effect CLI) where
@@ -90,7 +90,7 @@ addDefn localName defn = do
     uuid <- DefID <$> liftIO UUID.uuid
     let prop = PredName "eq" :@ [Var localName, uuid :% map Var (defDeps defn)]
     lift . modify $ \db -> db { dbDefns = Map.insert uuid defn (dbDefns db)
-                              , dbEnv = prop : dbEnv db }
+                              , dbAssumptions = prop : dbAssumptions db }
 
 makeDefn :: String -> Either String Definition
 makeDefn code = right (\v -> Definition { defCode = code, defDeps = Set.toList (JS.freeVars v)})
@@ -110,7 +110,7 @@ showRule :: Rule CLI -> PP.Doc
 showRule (assns :=> con) = showProp con PP.<+> PP.text ":-" PP.<+> PP.vcat (map showProp assns)
 
 showEnv :: Database -> PP.Doc
-showEnv db = PP.vcat (map showProp (dbEnv db))
+showEnv db = PP.vcat (map showProp (dbAssumptions db))
 
 type Parser = P.Parsec String () 
 
@@ -149,7 +149,7 @@ cmd = P.choice [
         liftIO . putStrLn . PP.render . showEnv $ db
 
     assume p = do
-        lift . modify $ \db -> db { dbEnv = p : dbEnv db }
+        lift . modify $ \db -> db { dbAssumptions = p : dbAssumptions db }
 
 mainShell :: Shell ()
 mainShell = do
