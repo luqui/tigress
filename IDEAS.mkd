@@ -1,4 +1,3 @@
-* "Suite" -- a collection of assumptions that can be imported in one go
 * Automatically search and confirm when using an abstraction not in scope
 * Come up with workflows for classes of changes:
     * Bugfixes

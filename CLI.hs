@@ -19,7 +19,7 @@ import qualified Text.Parsec.String as P
 import qualified Text.PrettyPrint as PP
 import qualified System.IO.Temp as Temp
 import qualified Data.Char as Char
-import Data.List (intercalate, isPrefixOf, tails, partition)
+import Data.List (intercalate, isPrefixOf, isInfixOf, tails, partition)
 import Data.Maybe (listToMaybe)
 import System.Process (system, rawSystem)
 import System.IO (hPutStrLn, hFlush, hClose)
@@ -44,11 +44,20 @@ data RuleDoc = RuleDoc {
 }
     deriving (Read,Show)
 
+data Suite = Suite {
+    suiteAssumptions :: [Prop CLI],
+    suiteScope :: Scope.Scope String (PredName CLI),
+    suiteName :: String,
+    suiteDescription :: String
+}
+    deriving (Read,Show)
+
 data Database = Database {
     dbRuleDocs    :: Map.Map (PredName CLI) RuleDoc,
     dbRules       :: Map.Map (PredName CLI) [Rule CLI],
     dbDefns       :: Map.Map (DefID CLI) Definition,
     dbRuleScope   :: Scope.Scope String (PredName CLI),
+    dbSuites      :: [Suite],
     dbAssumptions :: [Prop CLI],
     dbAssertions  :: [Prop CLI]
 }
@@ -65,6 +74,7 @@ emptyDatabase = Database {
     dbRules = singletonRule $ [] :=> PredBuiltin PredEq :@ [ Var "X", Var "X" ],
     dbDefns = Map.empty,
     dbRuleScope = Scope.empty,
+    dbSuites = [],
     dbAssumptions = [],
     dbAssertions = []
 }
@@ -205,11 +215,16 @@ defineEditor name = do
                 Nothing -> liftIO . putStrLn $ "cancelled"
     go "" ""
 
-wordIn :: String -> RuleDoc -> Bool
-wordIn s doc = find (rdocName doc) || find (rdocDescription doc)
+wordInDoc :: String -> RuleDoc -> Bool
+wordInDoc s doc = find (rdocName doc) || find (rdocDescription doc)
     where
-    find body = any (map Char.toLower s `isPrefixOf`) (tails body)
-    
+    find body = map Char.toLower s `isInfixOf` body
+
+wordInSuite :: String -> Suite -> Bool
+wordInSuite s suite = find (suiteName suite) || find (suiteDescription suite)
+    where
+    find body = map Char.toLower s `isInfixOf` body
+
 maybeRead :: Read a => String -> Maybe a
 maybeRead = fmap fst . listToMaybe . reads
 
@@ -238,13 +253,54 @@ clearAbs match = do
         dbRuleScope = Scope.fromList . filter (\(n,d) -> not (match n)) . Scope.toList $ dbRuleScope db
     }
 
+searchInterface :: (m -> PP.Doc) -> [m] -> (m -> Shell ()) -> Shell ()
+searchInterface showM matches select = do
+    forM_ (zip [0..] matches) $ \(i, m) ->
+        liftIO . putStrLn . PP.render $ PP.text (show i ++ ")") PP.<+> showM m
+    
+    input <- getInputLine "? "
+    case input >>= maybeRead of
+        Just num | num < length matches -> do
+            select (matches !! num)
+        _ -> liftIO . putStrLn $ "cancelled"
+
+searchDB :: [String] -> Shell ()
+searchDB ws = do
+    db <- lift get
+    let matches = [ (name, doc) | (name,doc) <- Map.toList (dbRuleDocs db), all (`wordInDoc` doc) ws ]
+    
+    searchInterface (ppText . rdocDescription . snd) matches $ \(name, doc) -> do
+        mname <- getInputLineWithInitial "name? " (rdocName doc, "")
+        case mname of
+            Just lname | not (null lname) -> do
+                lift . put $ db {
+                    dbRuleScope = Scope.insert lname name (dbRuleScope db)
+                }
+                liftIO . putStrLn $ "brought " ++ lname ++ " into scope"
+            _ -> liftIO . putStrLn $ "cancelled"
+                
+searchSuite :: [String] -> Shell ()
+searchSuite ws = do
+    db <- lift get
+    let matches = [ suite | suite <- dbSuites db, all (`wordInSuite` suite) ws ]
+    
+    searchInterface (ppText . suiteDescription) matches $ \suite -> do
+        lift . put $ db {
+            dbAssumptions = suiteAssumptions suite ++ dbAssumptions db,
+            dbRuleScope = suiteScope suite `Scope.union` dbRuleScope db
+        }
+        liftIO . putStrLn $ "assumed suite " ++ suiteName suite
+
+
 cmd :: Database -> Parser (Shell ())
 cmd db = P.choice $ map P.try [
     define <$> (P.string "define" *> space *> identifier),
     defineInline <$> (identifier <* P.spaces <* P.char '=' <* P.spaces) <*> anything,
     defabs <$> (P.string "defabs" *> space *> absId),
+    defsuite <$> (P.string "defsuite" *> space *> absId),
     abs <$> (P.string "abs" *> pure ()),
     search <$> (P.string "search" *> P.spaces *> anything),
+    suite <$> (P.string "suite" *> P.spaces *> anything),
     eval <$> ((P.string "eval" <|> P.string "!") *> anything),
     env <$> (P.string "env" *> pure ()),
     assume <$> (P.string "assume" *> space *> prop db),
@@ -277,6 +333,24 @@ cmd db = P.choice $ map P.try [
                 }
                 liftIO . putStrLn $ "defined"
 
+    defsuite name = do
+        db <- lift get
+        let assumptions = PP.nest 4 . PP.vcat $ map (showProp db) (dbAssumptions db)
+        mcontents <- liftIO $ simpleEditor "mkd" (unlines [name, "===", PP.render assumptions])
+        case mcontents of
+            Nothing -> liftIO . putStrLn $ "cancelled"
+            Just contents -> do
+                let suite = Suite { 
+                        suiteAssumptions = dbAssumptions db,
+                        suiteName = name,
+                        suiteScope = dbRuleScope db,
+                        suiteDescription = contents
+                        }
+                lift . modify $ \db -> db {
+                    dbSuites = suite : dbSuites db
+                }
+                liftIO . putStrLn $ "defined suite " ++ name
+        
     abs () = do
         db <- lift get
         forM_ (Scope.toList (dbRuleScope db)) $ \(k,v) -> do
@@ -284,26 +358,9 @@ cmd db = P.choice $ map P.try [
                 Nothing -> liftIO . putStrLn $ k
                 Just doc -> liftIO . putStrLn . PP.render $ PP.text k PP.<+> ppText (rdocDescription doc)
 
-    search text = do
-        db <- lift get
-        let ws = words text
-        let matches = [ (name, doc) | (name,doc) <- Map.toList (dbRuleDocs db), all (`wordIn` doc) ws ]
-        forM_ (zip [0..] matches) $ \(i, (name, doc)) -> 
-            liftIO . putStrLn . PP.render $ PP.text (show i ++ ") ") PP.<+> ppText (rdocDescription doc)
+    search = searchDB . words
 
-        input <- getInputLine "? "
-        case input >>= maybeRead of
-            Just num | num < length matches -> do
-                let match = matches !! num
-                mname <- getInputLineWithInitial "name? " (rdocName (snd match), "")
-                case mname of
-                    Just name | not (null name) -> do
-                        lift . put $ db {
-                            dbRuleScope = Scope.insert name (fst match) (dbRuleScope db)
-                        }
-                        liftIO . putStrLn $ "brought " ++ name ++ " into scope"
-                    _ -> liftIO . putStrLn $ "cancelled"
-            _ -> liftIO . putStrLn $ "cancelled"
+    suite = searchSuite . words
 
     env () = do
         db <- lift get

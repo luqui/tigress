@@ -1,5 +1,5 @@
 module Scope 
-    ( Scope, empty, toList, fromList, insert, lookupObj, lookupName, delete )
+    ( Scope, empty, toList, fromList, insert, lookupObj, lookupName, union, delete )
 where
 
 import qualified Data.Map as Map
@@ -35,6 +35,12 @@ lookupObj name scope = Map.lookup name (nameToObj scope)
 
 lookupName :: (Ord obj) => obj -> Scope name obj -> Maybe name
 lookupName obj scope = Map.lookup obj (objToName scope)
+
+union :: (Ord name, Ord obj) => Scope name obj -> Scope name obj -> Scope name obj
+union s s' = Scope {
+    nameToObj = nameToObj s `Map.union` nameToObj s',
+    objToName = objToName s `Map.union` objToName s'
+}
 
 delete :: (Ord name, Ord obj) => name -> Scope name obj -> Scope name obj
 delete name scope = Scope {
