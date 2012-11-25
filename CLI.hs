@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses, RecordWildCards, DoAndIfThenElse, EmptyDataDecls #-}
+{-# LANGUAGE TypeFamilies, FlexibleInstances, MultiParamTypeClasses, RecordWildCards, DoAndIfThenElse, EmptyDataDecls, PatternGuards #-}
 
 module CLI where
 
@@ -28,6 +28,7 @@ import System.Directory (doesFileExist)
 
 import Solver
 import qualified Javascript as JS
+import qualified Scope
 
 data CLI
 
@@ -47,7 +48,7 @@ data Database = Database {
     dbRuleDocs    :: Map.Map (PredName CLI) RuleDoc,
     dbRules       :: Map.Map (PredName CLI) [Rule CLI],
     dbDefns       :: Map.Map (DefID CLI) Definition,
-    dbRuleScope   :: Map.Map String (PredName CLI),
+    dbRuleScope   :: Scope.Scope String (PredName CLI),
     dbAssumptions :: [Prop CLI],
     dbAssertions  :: [Prop CLI]
 }
@@ -63,7 +64,7 @@ emptyDatabase = Database {
     dbRuleDocs = Map.singleton (PredBuiltin PredEq) eqDoc,
     dbRules = singletonRule $ [] :=> PredBuiltin PredEq :@ [ Var "X", Var "X" ],
     dbDefns = Map.empty,
-    dbRuleScope = Map.empty,
+    dbRuleScope = Scope.empty,
     dbAssumptions = [],
     dbAssertions = []
 }
@@ -136,17 +137,22 @@ showObject :: Object CLI -> PP.Doc
 showObject (Var v) = PP.text v
 showObject (DefID def :% deps) = PP.text (show def) PP.<> PP.brackets (PP.hsep (PP.punctuate PP.comma (map showObject deps)))
 
-showProp :: Prop CLI -> PP.Doc
-showProp (n :@ args) = PP.text (show n) PP.<+> PP.hsep (map showObject args)
+showPredName :: Database -> PredName CLI -> PP.Doc
+showPredName db o
+    | Just n <- Scope.lookupName o (dbRuleScope db) = PP.text n
+    | otherwise                                     = PP.text (show o)
 
-showRule :: Rule CLI -> PP.Doc
-showRule (assns :=> con) = showProp con PP.<+> PP.text ":-" PP.<+> PP.vcat (map showProp assns)
+showProp :: Database -> Prop CLI -> PP.Doc
+showProp db (n :@ args) = showPredName db n PP.<+> PP.hsep (map showObject args)
+
+showRule :: Database -> Rule CLI -> PP.Doc
+showRule db (assns :=> con) = showProp db con PP.<+> PP.text ":-" PP.<+> PP.vcat (map (showProp db) assns)
 
 showEnv :: Database -> PP.Doc
 showEnv db = PP.vcat 
-    [ PP.vcat (map showProp (dbAssumptions db))
+    [ PP.vcat (map (showProp db) (dbAssumptions db))
     , PP.text "----------"
-    , PP.vcat (map showProp (dbAssertions db))
+    , PP.vcat (map (showProp db) (dbAssertions db))
     ]
 
 type Parser = P.Parsec String () 
@@ -155,7 +161,7 @@ predName :: Database -> Parser (PredName CLI)
 predName db = P.choice $ map P.try [
     P.string "eq" *> pure (PredBuiltin PredEq),
     P.many1 P.alphaNum >>= \s -> do
-        Just name <- return $ Map.lookup s (dbRuleScope db)
+        Just name <- return $ Scope.lookupObj s (dbRuleScope db)
         return name
     ]
     
@@ -232,7 +238,7 @@ cmd db = P.choice $ map P.try [
                 let doc = RuleDoc { rdocName = name, rdocDescription = contents }
                 lift . put $ db {
                     dbRuleDocs = Map.insert pname doc (dbRuleDocs db),
-                    dbRuleScope = Map.insert name pname (dbRuleScope db)
+                    dbRuleScope = Scope.insert name pname (dbRuleScope db)
                 }
                 liftIO . putStrLn $ "defined"
 
@@ -251,7 +257,7 @@ cmd db = P.choice $ map P.try [
                 case mname of
                     Just name | not (null name) -> do
                         lift . put $ db {
-                            dbRuleScope = Map.insert name (fst match) (dbRuleScope db)
+                            dbRuleScope = Scope.insert name (fst match) (dbRuleScope db)
                         }
                         liftIO . putStrLn $ "brought " ++ name ++ " into scope"
                     _ -> liftIO . putStrLn $ "cancelled"
@@ -273,7 +279,7 @@ cmd db = P.choice $ map P.try [
         let newRules = Map.unionsWith (++) $ map (singletonRule . (assumptions :=>)) assertions
         lift . modify $ \db -> db {
             dbRules = Map.unionWith (++) newRules (dbRules db),
-            dbRuleScope = Map.empty,
+            dbRuleScope = Scope.empty,
             dbAssumptions = [],
             dbAssertions = []
         }
