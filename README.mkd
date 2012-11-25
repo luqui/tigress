@@ -25,20 +25,34 @@ And then use them
 
 And you can make abstractions
 
+    > defabs identity
+    (document)
     > assert identity id
 
 Check out
 
     > env
 
-Which shows you your current concrete environment.
+Which shows you your current concrete environment, and
+
+    > abs
+
+Which shows you the current abstractions in scope.
 
 Once you are done with a concrete environment, you can discharge it
 
     > clear
 
-And then use the abstractions
+And then use the abstractions.  To avoid namespace pollution, you have to search
+for them first:
 
+    > search identity
+    0)  identity
+        ========
+        `identity id` asserts that `id` is an identity function.
+    ? 0
+    name? identity
+    brought identity into scope
     > assume identity ident
     > eval ident(4)
 
