@@ -56,4 +56,4 @@ for them first:
     > assume identity ident
     > eval ident(4)
 
-More later.
+Notice that if you quit and restart, your session is saved.
