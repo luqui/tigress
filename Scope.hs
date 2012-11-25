@@ -1,5 +1,5 @@
 module Scope 
-    ( Scope, empty, insert, lookupObj, lookupName, delete )
+    ( Scope, empty, toList, insert, lookupObj, lookupName, delete )
 where
 
 import qualified Data.Map as Map
@@ -12,6 +12,9 @@ data Scope name obj = Scope {
 
 empty :: Scope name obj
 empty = Scope { nameToObj = Map.empty, objToName = Map.empty }
+
+toList :: Scope name obj -> [(name, obj)]
+toList = Map.toList . nameToObj
 
 insert :: (Ord name, Ord obj) => name -> obj -> Scope name obj -> Scope name obj
 insert name obj scope = Scope {

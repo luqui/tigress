@@ -215,6 +215,7 @@ cmd db = P.choice $ map P.try [
     define <$> (P.string "define" *> space *> P.many1 P.alphaNum),
     defineInline <$> (P.many1 P.alphaNum <* P.spaces <* P.char '=' <* P.spaces) <*> P.many (P.satisfy (const True)),
     defabs <$> (P.string "defabs" *> space *> P.many1 P.alphaNum),
+    abs <$> (P.string "abs" *> pure ()),
     search <$> (P.string "search" *> space *> P.many (P.satisfy (const True))),
     eval <$> ((P.string "eval" <|> P.string "!") *> P.many (P.satisfy (const True))),
     env <$> (P.string "env" *> pure ()),
@@ -241,6 +242,13 @@ cmd db = P.choice $ map P.try [
                     dbRuleScope = Scope.insert name pname (dbRuleScope db)
                 }
                 liftIO . putStrLn $ "defined"
+
+    abs () = do
+        db <- lift get
+        forM_ (Scope.toList (dbRuleScope db)) $ \(k,v) -> do
+            case Map.lookup v (dbRuleDocs db) of
+                Nothing -> liftIO . putStrLn $ k
+                Just doc -> liftIO . putStrLn . PP.render $ PP.text k PP.<+> ppText (rdocDescription doc)
 
     search text = do
         db <- lift get
