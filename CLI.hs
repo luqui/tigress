@@ -57,7 +57,7 @@ data Database = Database {
 eqDoc :: RuleDoc
 eqDoc = RuleDoc {
     rdocName = "eq",
-    rdocDescription = "`eq X Y` asserts that the objects X and Y are equal."
+    rdocDescription = "eq\n====\n`eq X Y` asserts that the objects X and Y are equal."
 }
 
 emptyDatabase = Database {
