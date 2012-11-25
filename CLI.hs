@@ -154,6 +154,7 @@ showObject (Var v) = PP.text v
 showObject (DefID def :% deps) = PP.text (show def) PP.<> PP.brackets (PP.hsep (PP.punctuate PP.comma (map showObject deps)))
 
 showPredName :: Database -> PredName CLI -> PP.Doc
+showPredName db (PredBuiltin PredEq) = PP.text "eq"
 showPredName db o
     | Just n <- Scope.lookupName o (dbRuleScope db) = PP.text n
     | otherwise                                     = PP.text (show o)
