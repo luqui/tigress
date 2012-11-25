@@ -19,7 +19,7 @@ import qualified Text.Parsec.String as P
 import qualified Text.PrettyPrint as PP
 import qualified System.IO.Temp as Temp
 import qualified Data.Char as Char
-import Data.List (intercalate, isPrefixOf, tails)
+import Data.List (intercalate, isPrefixOf, tails, partition)
 import Data.Maybe (listToMaybe)
 import System.Process (system, rawSystem)
 import System.IO (hPutStrLn, hFlush, hClose)
@@ -133,6 +133,12 @@ makeDefn code = right (\v -> Definition { defCode = code, defDeps = Set.toList (
 indent :: String -> String -> String
 indent pre = unlines . map (pre ++) . lines
 
+mentionedIn :: String -> Prop CLI -> Bool
+mentionedIn var (_ :@ objs) = any mentionedIn' objs
+    where
+    mentionedIn' (Var v) = v == var 
+    mentionedIn' (_ :% objs) = any mentionedIn' objs
+
 showObject :: Object CLI -> PP.Doc
 showObject (Var v) = PP.text v
 showObject (DefID def :% deps) = PP.text (show def) PP.<> PP.brackets (PP.hsep (PP.punctuate PP.comma (map showObject deps)))
@@ -210,22 +216,49 @@ maybeRead = fmap fst . listToMaybe . reads
 ppText :: String -> PP.Doc
 ppText = PP.vcat . map PP.text . lines
 
+discharge :: (Prop CLI -> Bool) -> Shell ()
+discharge match = do
+    assumptions <- lift $ gets dbAssumptions
+    assertions <- lift $ gets dbAssertions
+    let (kill1,keep1) = partition match assumptions
+    let (kill2,keep2) = partition match assertions
+    
+    let newRules = Map.unionsWith (++) . map (singletonRule . (assumptions :=>)) $ kill2
+    lift . modify $ \db -> db {
+        dbRules = Map.unionWith (++) newRules (dbRules db),
+        dbAssumptions = keep1,
+        dbAssertions = keep2
+    }
+
+clearAbs :: (String -> Bool) -> Shell ()
+clearAbs match = do
+    scope <- lift $ gets dbRuleScope
+    discharge (\(n :@ _) -> (match <$> Scope.lookupName n scope) == Just True)
+    lift . modify $ \db -> db {
+        dbRuleScope = Scope.fromList . filter (\(n,d) -> not (match n)) . Scope.toList $ dbRuleScope db
+    }
+
 cmd :: Database -> Parser (Shell ())
 cmd db = P.choice $ map P.try [
-    define <$> (P.string "define" *> space *> P.many1 P.alphaNum),
-    defineInline <$> (P.many1 P.alphaNum <* P.spaces <* P.char '=' <* P.spaces) <*> P.many (P.satisfy (const True)),
-    defabs <$> (P.string "defabs" *> space *> P.many1 P.alphaNum),
+    define <$> (P.string "define" *> space *> identifier),
+    defineInline <$> (identifier <* P.spaces <* P.char '=' <* P.spaces) <*> anything,
+    defabs <$> (P.string "defabs" *> space *> absId),
     abs <$> (P.string "abs" *> pure ()),
-    search <$> (P.string "search" *> space *> P.many (P.satisfy (const True))),
-    eval <$> ((P.string "eval" <|> P.string "!") *> P.many (P.satisfy (const True))),
+    search <$> (P.string "search" *> P.spaces *> anything),
+    eval <$> ((P.string "eval" <|> P.string "!") *> anything),
     env <$> (P.string "env" *> pure ()),
     assume <$> (P.string "assume" *> space *> prop db),
     assert <$> (P.string "assert" *> space *> prop db),
-    clear <$> (P.string "clear" *> pure ()),
+    clear <$> (P.string "clear" *> P.many (space *> identifier)),
     return (return ())
     ]
 
     where
+    identifier = P.many1 (P.alphaNum <|> P.oneOf("_$"))
+    absId = P.many1 (P.alphaNum <|> P.oneOf("-_"))
+    anything = P.many (P.satisfy (const True))
+    
+
     define = defineEditor
 
     defineInline = defineLocal
@@ -282,16 +315,9 @@ cmd db = P.choice $ map P.try [
     assert p = do
         lift . modify $ \db -> db { dbAssertions = p : dbAssertions db }
 
-    clear () = do
-        assumptions <- lift $ gets dbAssumptions
-        assertions <- lift $ gets dbAssertions
-        let newRules = Map.unionsWith (++) $ map (singletonRule . (assumptions :=>)) assertions
-        lift . modify $ \db -> db {
-            dbRules = Map.unionWith (++) newRules (dbRules db),
-            dbRuleScope = Scope.empty,
-            dbAssumptions = [],
-            dbAssertions = []
-        }
+    clear [] = discharge (const True) >> clearAbs (const True)
+    clear ids = discharge (\a -> any (`mentionedIn` a) ids)
+             >> clearAbs (\n -> any (== n) ids)
 
     eval str = do
         code <- assemble
