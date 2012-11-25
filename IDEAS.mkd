@@ -5,4 +5,5 @@
     * Refactors
 * What if the same PropName is brought into scope under two different local names?
 * Transporting database between versions
+* Optimize code generation to reuse definitions
 
