@@ -221,7 +221,8 @@ cmd db = P.choice $ map P.try [
     env <$> (P.string "env" *> pure ()),
     assume <$> (P.string "assume" *> space *> prop db),
     assert <$> (P.string "assert" *> space *> prop db),
-    clear <$> (P.string "clear" *> pure ())
+    clear <$> (P.string "clear" *> pure ()),
+    return (return ())
     ]
 
     where
