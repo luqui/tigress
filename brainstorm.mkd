@@ -1,0 +1,66 @@
+So you make some definitions like
+
+    > xs = [1,2,3,4,5]
+    > sum = (function() { 
+    .           var s = 0; 
+    .           for (var i = 0; i < xs.length; i++) { s += xs }
+    .           return s
+    .        })
+    > eval sum
+    15
+    > average = sum / xs.length
+    > eval average
+    3
+
+After which your environment looks like:
+
+    eq xs      gobbledygook0[]
+    eq sum     gobbledygook1[xs]
+    eq length  gobbledygook2[xs,sum]
+    ======
+
+You recognize (hopefully procedurally somehow, e.g. using libraries) that `xs`
+needs to be a list of integers for this to work.  So you
+
+    > assert list num xs
+
+(in so many words) which adds
+
+    ======
+    [`xs` is a list of numbers]
+
+to the environment. Now we abstract `xs` which removes the concrete definition
+and moves relevant assertions to assumptions.
+
+    [`xs` is a list of numbers]
+    eq sum     gobbledygook1[xs]
+    eq length  gobbledygook2[xs,sum]
+    ======
+
+We also have a rule in the database:
+
+    eq xs gobbledygook0[] => [`xs` is a list of numbers]
+
+If we abstracted length now, it would disappear not to be recovered.  For these
+definitions to persist, we need to document them:
+
+    assert [`length` is the length of `xs`]
+    assert [`sum` is the sum of `xs`]
+
+So we have
+
+    [`xs` is a list of numbers]
+    eq sum     gobbledygook1[xs]
+    eq length  gobbledygook2[xs,sum]
+    ======
+    [`length` is the length of `xs`]
+    [`sum` is the sum of `xs`]
+
+Now we can discharge them and get:
+
+    list num xs
+    [`length` is the length of `xs`]
+    [`sum` is the sum of `xs`]
+    ======
+
+
