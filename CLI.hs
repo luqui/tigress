@@ -289,21 +289,28 @@ searchSuite ws = do
         }
         liftIO . putStrLn $ "assumed suite " ++ suiteName suite
 
+errors :: (MonadPlus m) => m a -> (a -> Either String b) -> m a
+m `errors` p = do
+    x <- m
+    case p x of
+        Left err -> fail err
+        Right _ -> return x
 
 cmd :: Database -> Parser (Shell ())
 cmd db = P.choice $ map P.try [
-    define <$> (P.string "define" *> space *> identifier),
+    define <$> (P.string ":define" *> space *> identifier),
     defineInline <$> (identifier <* P.spaces <* P.char '=' <* P.spaces) <*> anything,
-    defabs <$> (P.string "defabs" *> space *> absId),
-    defsuite <$> (P.string "defsuite" *> space *> absId),
-    abs <$> (P.string "abs" *> pure ()),
-    search <$> (P.string "search" *> P.spaces *> anything),
-    suite <$> (P.string "suite" *> P.spaces *> anything),
-    eval <$> ((P.string "eval" <|> P.string "!") *> anything),
-    env <$> (P.string "env" *> pure ()),
-    assume <$> (P.string "assume" *> space *> prop db),
-    assert <$> (P.string "assert" *> space *> prop db),
-    clear <$> (P.string "clear" *> P.many (space *> identifier)),
+    defabs <$> (P.string ":defabs" *> space *> absId),
+    defsuite <$> (P.string ":defsuite" *> space *> absId),
+    search <$> (P.string ":search" *> P.spaces *> anything),
+    suite <$> (P.string ":suite" *> P.spaces *> anything),
+    env <$> (P.string ":env" *> pure ()),
+    assume <$> (P.string ":assume" *> space *> prop db),
+    assert <$> (P.string ":assert" *> space *> prop db),
+    abstract <$> (P.string ":abstract" *> P.many (space *> identifier)),
+    abs <$> (P.string ":abs" *> pure ()),
+    clear <$> (P.string ":clear" *> P.many (space *> identifier)),
+    eval <$> (anything `errors` JS.vars),
     return (return ())
     ]
 
@@ -369,6 +376,11 @@ cmd db = P.choice $ map P.try [
     assert p = lift . modify $ \db -> db { 
                    dbRules = Map.unionWith (++) (singletonRule (withDeps db p)) (dbRules db) 
                }
+
+    abstract ids = discharge $ \p -> 
+        case p of
+            PredBuiltin PredEq :@ [Var a,b] | a `elem` ids -> True
+            _                                              -> False
 
     clear [] = discharge (const True) >> clearAbs (const True)
     clear ids = discharge (\a -> any (`mentionedIn` a) ids)
