@@ -19,6 +19,7 @@ import qualified Text.Parsec.String as P
 import qualified Text.PrettyPrint as PP
 import qualified System.IO.Temp as Temp
 import qualified Data.Char as Char
+import Data.Foldable (foldMap)
 import Data.List (intercalate, isPrefixOf, isInfixOf, tails, partition)
 import Data.Maybe (listToMaybe)
 import System.Process (system, rawSystem)
@@ -58,8 +59,7 @@ data Database = Database {
     dbDefns       :: Map.Map (DefID CLI) Definition,
     dbRuleScope   :: Scope.Scope String (PredName CLI),
     dbSuites      :: [Suite],
-    dbAssumptions :: [Prop CLI],
-    dbAssertions  :: [Prop CLI]
+    dbAssumptions :: [Prop CLI]
 }
     deriving (Read,Show)
 
@@ -75,8 +75,7 @@ emptyDatabase = Database {
     dbDefns = Map.empty,
     dbRuleScope = Scope.empty,
     dbSuites = [],
-    dbAssumptions = [],
-    dbAssertions = []
+    dbAssumptions = []
 }
 
 singletonRule :: Rule CLI -> Map.Map (PredName CLI) [Rule CLI]
@@ -140,14 +139,26 @@ makeDefn :: String -> Either String Definition
 makeDefn code = right (\v -> Definition { defCode = code, defDeps = Set.toList (JS.freeVars v)})
                 (JS.vars code)
 
-indent :: String -> String -> String
-indent pre = unlines . map (pre ++) . lines
-
 mentionedIn :: String -> Prop CLI -> Bool
 mentionedIn var (_ :@ objs) = any mentionedIn' objs
     where
     mentionedIn' (Var v) = v == var 
     mentionedIn' (_ :% objs) = any mentionedIn' objs
+
+mentionedVars :: Prop CLI -> Set.Set String
+mentionedVars (_ :@ objs) = foldMap objMentionedVars objs
+
+objMentionedVars :: Object CLI -> Set.Set String
+objMentionedVars (Var v) = Set.singleton v
+objMentionedVars (_ :% objs) = foldMap objMentionedVars objs
+
+propDeps :: Database -> Prop CLI -> [Prop CLI]
+propDeps db prop = filter (intersects (mentionedVars prop) . mentionedVars) $ dbAssumptions db
+    where
+    intersects a b = not . Set.null $ Set.intersection a b
+
+withDeps :: Database -> Prop CLI -> Rule CLI
+withDeps db prop = propDeps db prop :=> prop
 
 showObject :: Object CLI -> PP.Doc
 showObject (Var v) = PP.text v
@@ -167,10 +178,7 @@ showRule db (assns :=> con) = showProp db con PP.<+> PP.text ":-" PP.<+> PP.vcat
 
 showEnv :: Database -> PP.Doc
 showEnv db = PP.vcat 
-    [ PP.vcat (map (showProp db) (dbAssumptions db))
-    , PP.text "----------"
-    , PP.vcat (map (showProp db) (dbAssertions db))
-    ]
+    [ PP.vcat (map (showProp db) (dbAssumptions db)) ]
 
 type Parser = P.Parsec String () 
 
@@ -233,18 +241,7 @@ ppText :: String -> PP.Doc
 ppText = PP.vcat . map PP.text . lines
 
 discharge :: (Prop CLI -> Bool) -> Shell ()
-discharge match = do
-    assumptions <- lift $ gets dbAssumptions
-    assertions <- lift $ gets dbAssertions
-    let (kill1,keep1) = partition match assumptions
-    let (kill2,keep2) = partition match assertions
-    
-    let newRules = Map.unionsWith (++) . map (singletonRule . (assumptions :=>)) $ kill2
-    lift . modify $ \db -> db {
-        dbRules = Map.unionWith (++) newRules (dbRules db),
-        dbAssumptions = keep1,
-        dbAssertions = keep2
-    }
+discharge match = lift . modify $ \db -> db { dbAssumptions = filter (not . match) (dbAssumptions db) }
 
 clearAbs :: (String -> Bool) -> Shell ()
 clearAbs match = do
@@ -367,11 +364,11 @@ cmd db = P.choice $ map P.try [
         db <- lift get
         liftIO . putStrLn . PP.render . showEnv $ db
 
-    assume p = do
-        lift . modify $ \db -> db { dbAssumptions = p : dbAssumptions db }
+    assume p = do lift . modify $ \db -> db { dbAssumptions = p : dbAssumptions db }
 
-    assert p = do
-        lift . modify $ \db -> db { dbAssertions = p : dbAssertions db }
+    assert p = lift . modify $ \db -> db { 
+                   dbRules = Map.unionWith (++) (singletonRule (withDeps db p)) (dbRules db) 
+               }
 
     clear [] = discharge (const True) >> clearAbs (const True)
     clear ids = discharge (\a -> any (`mentionedIn` a) ids)
@@ -389,12 +386,9 @@ cmd db = P.choice $ map P.try [
 assemble :: Shell (Maybe String)
 assemble = do
     props <- lift $ gets dbAssumptions
-    ruleProps <- lift $ gets dbAssertions
     defns <- lift $ gets dbDefns
-    let newRules = Map.unionsWith (++) $ map (singletonRule . ([] :=>)) ruleProps
     db <- lift get
-    let db' = db { dbRules = Map.unionWith (++) newRules (dbRules db) }
-    case map fst $ runReader (runEffect (runSolver (mapM_ satisfy props) 1)) db' of
+    case map fst $ runReader (runEffect (runSolver (mapM_ satisfy props) 1)) db of
         [] -> do
             liftIO . putStrLn $ "No solution"
             return Nothing
