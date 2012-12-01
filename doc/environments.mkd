@@ -1,0 +1,72 @@
+When you are defining a transformation, there are several different roles that
+objects fall into.  We will take my prototypical example of defining an average
+function on a list.
+
+    xs = [1,2,3,4,5,6]
+    assert `xs` is a list of numbers
+    assert `xs` is nonempty
+    sum = (function() {
+        var s = 0; 
+        for (var i = 0; i < xs.length; i++) { 
+            s += xs[i];
+        }
+        return s;
+    })()
+    length = xs.length
+    average = sum / length
+
+Here `xs` is not a definition we want to keep -- it is a parameter with an
+example value, but we intend to abstract it away.  Of course, the idea of
+sequent is that things get abstracted away even when we don't explicitly intend
+it, but there are differences in how things get treated. 
+
+For exampe, when we `assert \`xs\` is a list of numbers`, we are really treating
+that more like an assumption for the following code than like a fact to put in
+the database.
+
+There is also a workflow difference between ambient assumptions and parametric
+assumptions.  That is, we more naturally consider `average` to be a function of
+a specific list than the concept of division, although (in the idealization of
+Sequent that I'm heading toward) those are both parameters to `average`.  This
+may be important when importing `average` after defining it -- the ambient
+environment is by default automatically included, whereas the parametric
+environment is by default abstracted.  (But it is important that those defaults
+can be changed)
+
+There is an additional subtlety in this example -- `\`xs\` is nonempty` needn't
+be there for `sum` and `length`, only for `average`.  Indeed, it is very
+possible that programmer didn't even think of that constraint, and part of the
+vision is to help the programmer think of things like that.  But I think that is
+a topic for another time.
+
+So what exactly does the parameter environment mean?  Are parameters available
+to the solver, or is the solver just for finding the right ambient environment
+for the functions you want?  The latter is essentially a typeclass system, where
+the former is more like a logic programming environment.  I think I want
+something more like the former -- where the computer does as much work as it can
+for you, and you are just responsible for defining the abstraction boundaries.
+
+But I have been thinking that functions need signatures so that we can talk
+about them as first-class objects.  This is relevant because maybe the
+parameter environment gets pulled into the function signature instead of the
+environment.  (But since environments and parameters are really equivalent in a
+way, we should support converting between environments parameters and function
+parameters in the calculus).  So perhaps this is a valid proposition:
+
+    `xs` is a list of numbers ==> `average(xs)` is the average of `xs`
+
+This is reminding me of the Skolem functions of some of the first Sequent ideas.
+Is this equivalent to anything currently representable in the calculus?  Well,
+it could just be a hint to keep `xs` abstract when importing `average`, but that
+means that this is a quantified property.  That is, if you have a function:
+
+    function(xs,ys) { return average(xs) + average(ys) }
+
+then a _proposition_ in its environment would have to be the above rule.  This
+is getting into undecidable land.  But there is nothing in principle keeping us
+from using quantified propositions -- as long as we don't have to guess at
+substitutions.  I guess this comes down to higher order unification, doesn't it?
+But we are also assuming an interactive setting, which could help with problems
+like that.
+
+
