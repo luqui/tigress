@@ -69,4 +69,38 @@ substitutions.  I guess this comes down to higher order unification, doesn't it?
 But we are also assuming an interactive setting, which could help with problems
 like that.
 
+But I digrees.  I'm picturing four environments right now:
 
+1. The _ambient_ environment, which contains current working assumptions. This
+   corresponds to eg. your current imports -- e.g. that `cons` and `nil` are
+   instances of the `List` abstraction, etc.  It also contains helper
+   definitions for what you are working toward.  The ambient environment
+   contains the conceptual primitives in terms of which your code is defined.
+   Any new definitions are by default entered into the ambient environment.
+2. The _parametric_ environment, which contains the parameters and assumptions
+   to the functions you are writing.  This is different than the ambient
+   environment because it communicates a sense of more locality.  You don't
+   really ever need to use the average of a specific list, you want to use the
+   idea of averaging, but you would prefer if the constraints on what averaging
+   means were filled in automatically.  So the list to be averaged is in the
+   parametric environment (when you are defining average), and everything else
+   is ambient.
+3. The _system_ environment, which contains information about the current
+   development environment that should not be entered as assumptions to new
+   definitions.  This might contain the IP and port of your development server,
+   or the definition of the object language you are using (if you are working at
+   a high enough level of abstraction -- I hope to one day get there).
+4. The _test_ environment, which contains local testing definitions, which are
+   also not entered as assumptions to new definitions. For example, if you are
+   defining code on lists, maybe the solver picks cons lists for you.  But you
+   observe a bug when used with arrays, so you enter `eq List ArrayImpl` into
+   your test environment to constrain the solver to pick arrays instead.  The
+   only reason test is different than system is a matter of convenience -- the
+   system environment stays more-or-less constant when working on a specific
+   project, while the test environment is probably thrown away after each task.
+
+Everything here is straightforward to implement except for the parametric
+environment.  That is probably why I gave it so much attention in the beginning
+of this document.  Figuring out the workings of the parametric environment
+essentially entails figuring out the logical model of functions.  That is
+something we probably need to do, though.
