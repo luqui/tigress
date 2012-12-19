@@ -1,0 +1,30 @@
+In `environments.mkd`, I discussed the _parametric environment_, which contains
+items that were intended to be used as function parameters.  The working example
+there was an `average` function which computed the average of a list.  The
+definition style was:
+
+    > xs = [1,2,3,4,5,6]
+    > assert list xs
+    > sum = ...
+    > length = ...
+    > average = sum / length
+
+However, in the current implementation, you may only use `average` as a value,
+not as a function.  So to compute the average of a different list, you would
+have to define another thing of type `list`, bring it into scope, and then refer
+to `average` as a value (and its connection with the list you defined might be a
+bit covert).  In particular, a computation involving averages of two different
+lists, e.g.
+
+    average(xs) - average(ys)
+
+would be impossible to express.
+
+The purpose of this document is to make some progress toward figuring out how to
+express that computation, and how functions are modeled in general.  I suspect
+any solution here should also give a mechanism for specializing models (e.g.
+"import an `average` function that works on arrays without assuming that all
+lists are arrays").  Indeed, it's the same problem -- the above is "give me an
+`average` value which works on this specific `xs`".
+
+
