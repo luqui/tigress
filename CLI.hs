@@ -325,7 +325,7 @@ cmd db = P.choice [ P.try parser | Command parser _ _ <- commands ]
                   ],
         Command (defsuite <$> (P.string ":defsuite" *> space *> absId))
             ":defsuite <name>"
-            $ doc [ "Defines a new suite." ],
+            $ doc [ "Saves the current local environment into a suite." ],
         Command (search <$> (P.string ":search" *> P.spaces *> anything))
             ":search <text>"
             $ doc [ "Searches the database for the given text in the documentation of an"
@@ -346,7 +346,7 @@ cmd db = P.choice [ P.try parser | Command parser _ _ <- commands ]
                   ],
         Command (assert <$> (P.string ":assert" *> space *> prop db))
             ":assert <pred>"
-            $ doc [ "Not sure what this does." ],
+            $ doc [ "Specify that the given proposition is true in the current environment." ],
         Command (abstract <$> (P.string ":abstract" *> P.many (space *> identifier)))
             ":abstract <name1> [ <name2> ... ]"
             $ doc [ "Clears the definitions of the given identifiers from the environment,"
