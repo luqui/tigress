@@ -348,13 +348,14 @@ cmd db = P.choice [ P.try parser | Command parser _ _ <- commands ]
             ":assert <pred>"
             $ doc [ "Specify that the given proposition is true in the current environment." ],
         Command (abstract <$> (P.string ":abstract" *> P.many (space *> identifier)))
-            ":abstract <name1> [ <name2> ... ]"
+            ":abstract [ <name1> <name2> ... ]"
             $ doc [ "Clears the definitions of the given identifiers from the environment,"
-                  , "allowing it to vary according to its constraints" 
+                  , "allowing it to vary according to its constraints.  If no identifiers are"
+                  , "given, abstracts all of them." 
                   ],
         Command (abs <$> (P.string ":abs" *> pure ()))
             ":abs"
-            $ doc [ "Abstract all identifiers." ],
+            $ doc [ "List the abstraction environment." ],
         Command (clear <$> (P.string ":clear" *> P.many (space *> identifier)))
             ":clear [ <name1> ... ]"
             $ doc [ "If names are given, clears the given names from the local environment."
