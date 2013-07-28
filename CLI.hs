@@ -296,30 +296,85 @@ m `errors` p = do
         Left err -> fail err
         Right _ -> return x
 
-cmd :: Database -> Parser (Shell ())
-cmd db = P.choice $ map P.try [
-    define <$> (P.string ":define" *> space *> identifier),
-    defineInline <$> (identifier <* P.spaces <* P.char '=' <* P.spaces) <*> anything,
-    defabs <$> (P.string ":defabs" *> space *> absId),
-    defsuite <$> (P.string ":defsuite" *> space *> absId),
-    search <$> (P.string ":search" *> P.spaces *> anything),
-    suite <$> (P.string ":suite" *> P.spaces *> anything),
-    env <$> (P.string ":env" *> pure ()),
-    assume <$> (P.string ":assume" *> space *> prop db),
-    assert <$> (P.string ":assert" *> space *> prop db),
-    abstract <$> (P.string ":abstract" *> P.many (space *> identifier)),
-    abs <$> (P.string ":abs" *> pure ()),
-    clear <$> (P.string ":clear" *> P.many (space *> identifier)),
-    eval <$> (anything `errors` JS.vars),
-    return (return ())
-    ]
+data Command = Command {
+    cmdParser :: Parser (Shell ()),
+    cmdScheme :: String,
+    cmdDoc    :: PP.Doc
+}
 
+cmd :: Database -> Parser (Shell ())
+cmd db = P.choice [ P.try parser | Command parser _ _ <- commands ]
     where
+    commands = [
+        Command (help <$> (P.string ":help" *> pure ()))
+            ":help"
+            $ doc [ "Shows all commands with descriptions" ],
+        Command (defineInline <$> (identifier <* P.spaces <* P.char '=' <* P.spaces) <*> anything)
+            "<name> = <defn>"
+            $ doc [ "Introduces a new object with the given name and definition into the local"
+                  , "environment" ],
+        Command (define <$> (P.string ":define" *> space *> identifier))
+            ":define <name>"
+            $ doc [ "Defines a new object.  Opens an editor to edit a new object, then defines"
+                  , "the given name to denote that object in the local environment" 
+                  ],
+        Command (defabs <$> (P.string ":defabs" *> space *> absId))
+            ":defabs <name>"
+            $ doc [ "Defines a new abstraction.  Opens an editor to edit the documentation for"
+                  , "a new abstraction and introduces it into the local environment"
+                  ],
+        Command (defsuite <$> (P.string ":defsuite" *> space *> absId))
+            ":defsuite <name>"
+            $ doc [ "Defines a new suite." ],
+        Command (search <$> (P.string ":search" *> P.spaces *> anything))
+            ":search <text>"
+            $ doc [ "Searches the database for the given text in the documentation of an"
+                  , "abstraction. You have the option to introduce it into the local environment"
+                  , "with a name of your choosing" 
+                  ],
+        Command (suite <$> (P.string ":suite" *> P.spaces *> anything))
+            ":suite <text>"
+            $ doc [ "Searches the database for the given text in the documentation of a suite" ],
+        Command (env <$> (P.string ":env" *> pure ()))
+            ":env"
+            $ doc [ "List all the objects defined in the local environment" ],
+        Command (assume <$> (P.string ":assume" *> space *> prop db))
+            ":assume <pred>"
+            $ doc [ "Constrain the current abstract environment by the given predicate."
+                  , "Introduces any previously unmentioned identifiers into the local"
+                  , "environment." 
+                  ],
+        Command (assert <$> (P.string ":assert" *> space *> prop db))
+            ":assert <pred>"
+            $ doc [ "Not sure what this does." ],
+        Command (abstract <$> (P.string ":abstract" *> P.many (space *> identifier)))
+            ":abstract <name1> [ <name2> ... ]"
+            $ doc [ "Clears the definitions of the given identifiers from the environment,"
+                  , "allowing it to vary according to its constraints" 
+                  ],
+        Command (abs <$> (P.string ":abs" *> pure ()))
+            ":abs"
+            $ doc [ "Abstract all identifiers." ],
+        Command (clear <$> (P.string ":clear" *> P.many (space *> identifier)))
+            ":clear [ <name1> ... ]"
+            $ doc [ "If names are given, clears the given names from the local environment."
+                  , "Otherwise clears the entire environment."
+                  ],
+        Command (eval <$> (anything `errors` JS.vars))
+            "<javascript expression>"
+            $ doc [ "Evaluates the given expression as javascript in the local environment." ]
+        ]
+
     identifier = P.many1 (P.alphaNum <|> P.oneOf("_$"))
     absId = P.many1 (P.alphaNum <|> P.oneOf("-_"))
     anything = P.many (P.satisfy (const True))
-    
 
+    doc = PP.vcat . map PP.text
+
+    help () = liftIO . print $ PP.vcat [ PP.text spec PP.$+$ PP.nest 4 doc
+                                       | Command _ spec doc <- commands 
+                                       ]
+    
     define = defineEditor
 
     defineInline = defineLocal

@@ -16,44 +16,44 @@ objects
 
 Or if you prefer to use an editor
 
-    > define id
+    > :define id
 
 And then use them
 
-    > eval id(42)
+    > id(42)
     42
 
 And you can make abstractions
 
-    > defabs identity
+    > :defabs identity
     (document)
-    > assert identity id
+    > :assert identity id
 
 Check out
 
-    > env
+    > :env
 
 Which shows you your current concrete environment, and
 
-    > abs
+    > :abs
 
 Which shows you the current abstractions in scope.
 
 Once you are done with a concrete environment, you can discharge it
 
-    > clear
+    > :clear
 
 And then use the abstractions.  To avoid namespace pollution, you have to search
 for them first:
 
-    > search identity
+    > :search identity
     0)  identity
         ========
         `identity id` asserts that `id` is an identity function.
     ? 0
     name? identity
     brought identity into scope
-    > assume identity ident
-    > eval ident(4)
+    > :assume identity ident
+    > ident(4)
 
 Notice that if you quit and restart, your session is saved.
