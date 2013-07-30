@@ -18,7 +18,6 @@ import Control.Applicative
 import Control.Monad ((<=<))
 import Control.Monad.Logic
 import Control.Monad.Trans.State
-import Control.Arrow
 
 class (Eq (DefID c), Applicative (Effect c), Monad (Effect c)) => Config c where
     data DefID c :: *
