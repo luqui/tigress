@@ -10,6 +10,8 @@ module Solver
     )
 where
 
+import Prelude hiding (id, (.))
+import Category
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Control.Applicative
@@ -25,6 +27,24 @@ class (Eq (DefID c), Applicative (Effect c), Monad (Effect c)) => Config c where
 
     findRules :: PredName c -> Effect c [Rule c]
 
+
+data ConfigHom c c' = ConfigHom {
+        defIDMap :: DefID c -> DefID c',
+        predNameMap :: PredName c -> PredName c'
+    }
+
+instance GFunctor ConfigHom (->) DefID where
+    gfmap = defIDMap
+
+instance GFunctor ConfigHom (->) PredName where
+    gfmap = predNameMap
+
+
+instance Category ConfigHom where
+    id = ConfigHom id id
+    ConfigHom g g' . ConfigHom f f' = ConfigHom (g . f) (g' . f')
+
+
 type VarName = String
 
 type ReadConstraints c = (Read (PredName c), Read (DefID c))
@@ -36,11 +56,17 @@ data Prop c = PredName c :@ [Object c]
 deriving instance (ReadConstraints c) => Read (Prop c)
 deriving instance (ShowConstraints c) => Show (Prop c)
 
+instance GFunctor ConfigHom (->) Prop where
+    gfmap f (n :@ args) = gfmap f n :@ (map.gfmap) f args
+
 infix 6 :=>
 data Rule c = [Prop c] :=> Prop c
 
 deriving instance (ReadConstraints c) => Read (Rule c)
 deriving instance (ShowConstraints c) => Show (Rule c)
+
+instance GFunctor ConfigHom (->) Rule where
+    gfmap f (ps :=> p) = (fmap.gfmap) f ps :=> gfmap f p
 
 infix 8 :%
 data Object c
@@ -49,6 +75,12 @@ data Object c
 
 deriving instance (ReadConstraints c) => Read (Object c)
 deriving instance (ShowConstraints c) => Show (Object c)
+
+instance GFunctor ConfigHom (->) Object where
+    gfmap f (Var n) = Var n  -- need a morphism for this?
+    gfmap f (defid :% args) = gfmap f defid :% (map.gfmap) f args
+
+
 
 class FreeVars a where freeVars :: a -> Set.Set VarName
 instance (FreeVars a) => FreeVars [a] where freeVars = Set.unions . map freeVars
