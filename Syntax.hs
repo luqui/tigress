@@ -5,6 +5,7 @@ module Syntax where
 import Prelude hiding (mapM_)
 import Prelude.Extras
 import qualified Bound as B
+import Control.Monad (MonadPlus(..), liftM)
 import Data.Foldable
 import Data.Traversable
 import Data.Void
@@ -46,7 +47,7 @@ data Literal
 -- A `Theory con n` is a relationship between a set of variables in `n`,
 -- constrained over the functor `con`.
 data Theory con n = Theory [n] (con n)
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord, Show, Functor)
 
 instance Foldable (Theory con) where
     foldMap f (Theory xs _) = foldMap f xs
@@ -73,7 +74,19 @@ satisfy td rd = go
                 mapM_ (uncurry Solver.unify) . toList =<< Solver.fzip thn con'
                 let hyps' = (fmap.fmap.fmap) varMap hyps
                 mapM_ go hyps' 
-            
+
+ 
+data TheoryName thn con n = TheoryName thn [n]
+    deriving (Eq, Ord, Show, Functor)
+
+instance Foldable (TheoryName thn con) where
+    foldMap f (TheoryName _ vars) = foldMap f vars
+
+instance (Eq thn) => Solver.FZip (TheoryName thn con) where
+    fzip (TheoryName n vars) (TheoryName n' vars')
+        | n == n' = TheoryName n `liftM` Solver.fzip vars vars'
+        | otherwise = mzero
+
 
 
 {-
