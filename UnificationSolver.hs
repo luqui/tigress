@@ -1,6 +1,6 @@
 {-# LANGUAGE ExistentialQuantification, GeneralizedNewtypeDeriving, RankNTypes #-}
 
-module Solver 
+module UnificationSolver 
     ( FZip(..)
     , Free(..)
     , Solver

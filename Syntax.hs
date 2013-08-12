@@ -8,6 +8,7 @@ import Data.Foldable
 import Data.Traversable
 import Data.Void
 import qualified Data.Map as Map
+import qualified UnificationSolver as Solver
 
 data Exp a
     = EVar a
