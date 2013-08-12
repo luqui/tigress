@@ -13,6 +13,7 @@ import Control.Monad.Free (Free(..))
 import qualified Data.Map as Map
 import qualified UnificationSolver as Solver
 import Control.Applicative
+import qualified Control.Monad.Supply as Supply
 
 data Exp a
     = EVar a
@@ -76,16 +77,19 @@ satisfy td rd = go
                 mapM_ go hyps' 
 
  
-data TheoryName thn con n = TheoryName thn [n]
+data TheoryName thn n = TheoryName thn [n]
     deriving (Eq, Ord, Show, Functor)
 
-instance Foldable (TheoryName thn con) where
+instance Foldable (TheoryName thn) where
     foldMap f (TheoryName _ vars) = foldMap f vars
 
-instance (Eq thn) => Solver.FZip (TheoryName thn con) where
+instance (Eq thn) => Solver.FZip (TheoryName thn) where
     fzip (TheoryName n vars) (TheoryName n' vars')
         | n == n' = TheoryName n `liftM` Solver.fzip vars vars'
         | otherwise = mzero
+
+
+-- TODO little DSL for defining theories & rules
 
 
 
