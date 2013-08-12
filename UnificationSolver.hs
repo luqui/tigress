@@ -4,6 +4,7 @@ module UnificationSolver
     ( FZip(..)
     , Free(..)
     , Solver
+    , alloc
     , normalize
     , unify
     , instantiate

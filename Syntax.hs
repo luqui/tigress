@@ -1,14 +1,17 @@
-{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, ExistentialQuantification, TypeFamilies #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable, ExistentialQuantification, TypeFamilies, TupleSections, RankNTypes #-}
 
 module Syntax where
 
+import Prelude hiding (mapM_)
 import Prelude.Extras
 import qualified Bound as B
 import Data.Foldable
 import Data.Traversable
 import Data.Void
+import Control.Monad.Free (Free(..))
 import qualified Data.Map as Map
 import qualified UnificationSolver as Solver
+import Control.Applicative
 
 data Exp a
     = EVar a
@@ -45,13 +48,32 @@ data Literal
 data Theory con n = Theory [n] (con n)
     deriving (Eq, Ord, Show)
 
+instance Foldable (Theory con) where
+    foldMap f (Theory xs _) = foldMap f xs
 
-data Instantiation th v = forall n. (Ord n) => Instantiation (th n) (n -> v)
-data Rule th = forall v. (Ord v) => Rule [v] [Instantiation th (Exp v)] (Instantiation th (Exp v))
+data Rule th obj = forall v. (Ord v) => Rule [v] [th (Free obj v)] (th (Free obj v))
 
+data TheoryDict th con = TheoryDict { tdLookup :: forall n. th n -> Theory con n }
 
+data RuleDict th obj = RuleDict { rdLookup :: forall n. th n -> [Rule th obj] }
 
-
+satisfy :: (Ord v, Solver.FZip th, Solver.FZip obj, Foldable th, Foldable obj) 
+        => TheoryDict th con -> RuleDict th obj 
+        -> th (Free obj v) -> Solver.Solver obj v ()
+satisfy td rd = go
+    where
+    go thn = do
+        let theory = tdLookup td thn
+        let rules  = rdLookup rd thn
+        msum $ do                      -- list monad
+            Rule vars hyps con <- rules
+            return $ do                -- back to Solver
+                varMap <- (Map.!) . Map.fromList <$> traverse (\v -> (v,) <$> Solver.alloc) vars
+                let con'  = (fmap.fmap) varMap con
+                mapM_ (uncurry Solver.unify) . toList =<< Solver.fzip thn con'
+                let hyps' = (fmap.fmap.fmap) varMap hyps
+                mapM_ go hyps' 
+            
 
 
 {-
